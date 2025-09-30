@@ -1,7 +1,8 @@
+import multiprocessing
 import time
-from concurrent.futures import ProcessPoolExecutor, wait
 from hashlib import sha256
 from multiprocessing import cpu_count
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 PASSWORDS_TO_BRUTE_FORCE = [
     "b4061a4bcfe1a2cbf78286f3fab2fb578266d1bd16c414c650c5ac04dfc696e1",
@@ -20,26 +21,37 @@ PASSWORDS_TO_BRUTE_FORCE = [
 def sha256_hash_str(to_hash: str) -> str:
     return sha256(to_hash.encode("utf-8")).hexdigest()
 
-TARGET_HASHES = set(h.lower() for h in PASSWORDS_TO_BRUTE_FORCE)
+hash = set(h.lower() for h in PASSWORDS_TO_BRUTE_FORCE)
 
-def search_password(start: int, end: int) -> None:
-    for number in range(start, end):
-        password = f"{number:08d}"
-        if sha256_hash_str(password) in TARGET_HASHES:
-            print(f"Password found: {password}")
+def search_password(start: int, end: int, hash: set[str]) -> None:
+    found = {}
+    for num in range(start, end):
+        candidate = str(num).zfill(8)
+        hash_val = sha256_hash_str(candidate)
+        if hash_val in hash:
+            found[hash_val] = candidate
+            if len(found) == len(hash):
+                break
+    return found
 
 
 def brute_force_password() -> None:
-    tasks = []
-    max_number = 100_000_000
-    step = max_number // cpu_count()
-    with ProcessPoolExecutor(cpu_count()) as executor:
-        for start in range(0, max_number, step):
-            end = min(start + step, max_number)
-            tasks.append(executor.submit(search_password, start, end))
+    cpu_count = max(1, multiprocessing.cpu_count())
+    max_num = 100000000 // cpu_count
 
-    wait(tasks)
+    with ProcessPoolExecutor(cpu_count) as executor:
+        futures = []
+        for i in range(cpu_count):
+            start = i * max_num
+            end = (i + 1) * max_num if i < cpu_count - 1 else 100_000_000
+            futures.append(executor.submit(search_password, start, end, hash))
 
+        results = {}
+        for future in futures:
+            results.update(future.result())
+
+    for h in PASSWORDS_TO_BRUTE_FORCE:
+        print(results[h])
 
 if __name__ == "__main__":
     start_time = time.perf_counter()
